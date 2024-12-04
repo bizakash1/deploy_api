@@ -1,48 +1,58 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-import os
-from pathlib import Path
+from fastapi.responses import StreamingResponse
+from pymongo import MongoClient
+from gridfs import GridFS
+import base64
+import io
 
 app = FastAPI()
 
-# Directory to save files
-UPLOAD_DIR = "uploaded_files"
-Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+# MongoDB Connection
+client = MongoClient("mongodb+srv://Akash11:Pass123@cluster0.dqn6nis.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+db = client["mydatabase"]
+fs = GridFS(db)
 
 @app.post("/upload/")
 async def upload_file(unique_id: str, file: UploadFile = File(...)):
     """
-    API to upload a file with a unique identifier.
+    API to upload a file with a unique identifier to MongoDB using GridFS.
     Args:
         unique_id (str): Unique identifier for the file.
         file (UploadFile): File to be uploaded.
     Returns:
-        dict: Success message.
+        dict: Success message with the file's MongoDB ID.
     """
-    file_path = os.path.join(UPLOAD_DIR, unique_id + "_" + file.filename)
+    # Read file content
+    content = await file.read()
     
-    # Save the file to disk
-    with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
-    
-    return {"message": f"File '{file.filename}' uploaded successfully with unique_id '{unique_id}'."}
+    # Store file in GridFS with metadata
+    file_id = fs.put(content, filename=file.filename, metadata={"unique_id": unique_id})
+    return {"message": f"File '{file.filename}' uploaded successfully.", "file_id": str(file_id)}
 
 @app.get("/download/")
 async def download_file(unique_id: str):
     """
-    API to download a file associated with a unique identifier.
+    API to retrieve a file from MongoDB using unique ID and return it as a PDF.
     Args:
         unique_id (str): Unique identifier for the file.
     Returns:
-        FileResponse: File associated with the unique identifier.
+        StreamingResponse: The PDF file returned as a downloadable file.
     """
-    # Search for the file with the unique_id prefix
-    files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(unique_id + "_")]
-    
-    if not files:
-        raise HTTPException(status_code=404, detail="File not found.")
-    
-    # Return the first matching file
-    file_path = os.path.join(UPLOAD_DIR, files[0])
-    return FileResponse(file_path, media_type="application/octet-stream", filename=files[0])
+    try:
+        # Find the file by unique_id in the fs.files collection
+        file_document = db.fs.files.find_one({"metadata.unique_id": unique_id})
+        if not file_document:
+            raise HTTPException(status_code=404, detail="File not found.")
+        
+        # Retrieve the file from GridFS
+        file = fs.get(file_document["_id"])
+        
+        # Read the binary content of the file
+        file_content = file.read()
+
+        # Return the PDF as a downloadable file
+        return StreamingResponse(io.BytesIO(file_content),
+                                 media_type="application/pdf",  # Set the media type to PDF
+                                 headers={"Content-Disposition": f"attachment; filename={file.filename}"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
