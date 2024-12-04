@@ -8,7 +8,7 @@ import io
 app = FastAPI()
 
 # MongoDB Connection
-client = MongoClient("mongodb+srv://Akash11:Pass123@cluster0.dqn6nis.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+client = MongoClient("mongodb+srv://Akash11:Pass123@cluster0.dqn6nis.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0" , ssl = True)
 db = client["mydatabase"]
 fs = GridFS(db)
 
